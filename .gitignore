@@ -1,4 +1,24 @@
+# Virtual Environment
+.venv/
+
+# Python cache
 __pycache__/
 *.pyc
-.venv/
+
+# Dataset files (optional)
+data/*.csv
+
+# Model files
 models/*.pkl
+
+# Database
+database/*.db
+
+# Reports
+reports/*.pdf
+
+# Streamlit cache
+.streamlit/
+
+# Mac files
+.DS_Store

@@ -8,3 +8,7 @@ plotly
 shap
 joblib
 fpdf
+
+reportlab
+
+bcrypt
