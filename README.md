@@ -1,5 +1,7 @@
 # 🩺 HealthSense AI
 
+## Unified AI Healthcare Intelligence Platform
+
 ## AI-Powered Preventive Healthcare Intelligence Platform
 
 HealthSense AI is a full-stack AI healthcare screening platform designed to help users assess chronic disease risk using machine learning, explainable AI, advanced analytics, and patient-friendly healthcare reporting.
@@ -8,22 +10,36 @@ The platform currently supports:
 
 * Diabetes Risk Assessment
 * Heart Disease Risk Assessment
-* Full Health Screening
+* Unified Multi-Disease Health Screening
+* AI-Powered Medical Report PDF Upload
+* Automated Biomarker Extraction
 * Explainable AI Insights
+* Interactive Analytics Dashboards
 * PDF Health Reports
-* Patient Authentication & History Tracking
+* Secure Authentication & Patient History Tracking
+* Unified Health Intelligence Scoring
 
 ---
 
 # 🚀 Features
 
-## 🔍 AI Health Screening
+## 🔍 Unified AI Health Screening
 
 * Diabetes risk prediction
 * Heart disease risk prediction
-* Unified health screening workflow
-* Risk probability analysis
-* Intelligent health recommendations
+* Multi-model automated screening engine
+* Unified health intelligence scoring
+* Cross-disease risk aggregation
+* Intelligent preventive recommendations
+
+## 📄 AI Medical Report Analyzer
+
+* Upload medical report PDFs
+* Automatic biomarker extraction
+* Clinical value parsing
+* Automated health data detection
+* PDF-driven AI assessment workflow
+* Intelligent healthcare document processing
 
 ## 🧠 Explainable AI
 
@@ -73,6 +89,28 @@ The platform currently supports:
 
 # 🏗 System Architecture
 
+````text
+Medical Report Upload / Manual Input
+                ↓
+      Authentication Layer
+                ↓
+   AI Document Intelligence Engine
+                ↓
+     Biomarker Extraction Pipeline
+                ↓
+ Unified Multi-Disease AI Engine
+      ↓                    ↓
+Diabetes Model      Heart Disease Model
+      ↓                    ↓
+ Unified Health Intelligence Layer
+                ↓
+      Explainable AI (SHAP)
+                ↓
+     Analytics & Visualizations
+                ↓
+      PDF Health Report Engine
+                ↓
+      Patient History Database
 ```text
 User Input
     ↓
@@ -89,7 +127,7 @@ Analytics Dashboard
 PDF Report Generation
     ↓
 Patient History Database
-```
+````
 
 ---
 
@@ -128,16 +166,20 @@ Metrics:
 
 ---
 
-# 🧪 Supported Assessments
+# 🧪 Supported Assessments & Features
 
-| Assessment               | Status |
-| ------------------------ | ------ |
-| Diabetes Risk Prediction | ✅      |
-| Heart Disease Prediction | ✅      |
-| Full Health Screening    | ✅      |
-| Explainable AI Insights  | ✅      |
-| PDF Health Reports       | ✅      |
-| Patient History Tracking | ✅      |
+| Feature                           | Status |
+| --------------------------------- | ------ |
+| Diabetes Risk Prediction          | ✅      |
+| Heart Disease Prediction          | ✅      |
+| Unified Multi-Disease Screening   | ✅      |
+| AI Medical PDF Upload             | ✅      |
+| Automated Biomarker Extraction    | ✅      |
+| Explainable AI Insights           | ✅      |
+| Unified Health Intelligence Score | ✅      |
+| PDF Health Reports                | ✅      |
+| Authentication System             | ✅      |
+| Patient History Tracking          | ✅      |
 
 ---
 
@@ -161,6 +203,12 @@ Metrics:
 * Scikit-learn
 * SHAP
 * Joblib
+
+## Document AI
+
+* pdfplumber
+* PyMuPDF
+* Regex-based biomarker parsing
 
 ## Reporting
 
@@ -236,6 +284,8 @@ pip install -r requirements.txt
 ```bash
 streamlit run app.py
 ```
+
+---
 
 
 # 👨‍💻 Developer
