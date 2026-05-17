@@ -12,3 +12,6 @@ fpdf
 reportlab
 
 bcrypt
+
+pdfplumber
+pymupdf

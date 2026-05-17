@@ -42,6 +42,9 @@ from utils.heart.explain import generate_heart_explanation
 from utils.heart.preprocess import preprocess_pipeline as heart_preprocess_pipeline
 
 from database.auth import login, signup
+from database.history import save_screening, get_user_history, get_history_by_type
+from utils.document_ai.extract import extract_medical_pdf
+from utils.document_ai.parser import parse_medical_values
 
 # Configure simple logging for the app
 logging.basicConfig(level=logging.INFO)
@@ -410,17 +413,60 @@ def render_sidebar():
     
     st.sidebar.markdown("<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;'>", unsafe_allow_html=True)
 
+    intake_method = st.sidebar.radio("Intake Method", ["Manual Entry", "PDF Upload"], horizontal=True)
+    
+    if intake_method == "PDF Upload":
+        uploaded_file = st.sidebar.file_uploader("Upload Medical Report (PDF)", type=["pdf"])
+        if uploaded_file:
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                tmp_file.write(uploaded_file.getvalue())
+                tmp_path = tmp_file.name
+                
+            with st.sidebar.status("Extracting clinical telemetry...", expanded=True) as status:
+                try:
+                    st.write("Processing document...")
+                    extraction_results = extract_medical_pdf(tmp_path)
+                    if extraction_results.get("error"):
+                        status.update(label="Extraction failed.", state="error")
+                        st.sidebar.error(extraction_results["error"])
+                    else:
+                        st.write("Parsing biomarkers...")
+                        parsed_data = parse_medical_values(extraction_results["cleaned_text"])
+                        st.session_state["parsed_data"] = parsed_data
+                        status.update(label="Extraction Complete!", state="complete")
+                        
+                        # Display Success Metric Cards for what was found
+                        found_items = {k: v for k, v in parsed_data.items() if v is not None}
+                        if found_items:
+                            st.sidebar.markdown("<div style='background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 10px; margin-bottom: 15px;'>", unsafe_allow_html=True)
+                            st.sidebar.markdown("<p style='color: #10b981; font-weight: bold; margin-bottom:5px; text-align:center;'>✅ Detected Health Metrics</p>", unsafe_allow_html=True)
+                            for k, v in found_items.items():
+                                st.sidebar.markdown(f"<p style='margin:0; font-size: 0.85rem; color:#f8fafc;'>• {k}: <strong>{v}</strong></p>", unsafe_allow_html=True)
+                            st.sidebar.markdown("</div>", unsafe_allow_html=True)
+                        else:
+                            st.sidebar.warning("No standard biomarkers detected in this document.")
+                except Exception as e:
+                    status.update(label="System Error", state="error")
+                    st.sidebar.error(f"Error processing file: {e}")
+                finally:
+                    os.unlink(tmp_path)
+    
+    st.sidebar.markdown("<br>", unsafe_allow_html=True)
+
     with st.sidebar.form("patient_form"):
+        parsed = st.session_state.get("parsed_data", {})
+        
         if selected_disease == "Diabetes Risk Assessment":
             st.markdown("<h4 style='color: #f8fafc; margin-bottom: 10px; font-size: 1.1rem;'>Metabolic Profile</h4>", unsafe_allow_html=True)
-            glucose = st.number_input("Glucose Level (mg/dL)", min_value=0.0, max_value=300.0, value=100.0)
-            insulin = st.number_input("Insulin Level (IU/mL)", min_value=0.0, max_value=1000.0, value=79.0)
-            bmi = st.number_input("BMI Index", min_value=0.0, max_value=70.0, value=25.0, step=0.1)
+            glucose = st.number_input("Glucose Level (mg/dL)", min_value=0.0, max_value=300.0, value=float(parsed.get("Glucose") or 100.0))
+            insulin = st.number_input("Insulin Level (IU/mL)", min_value=0.0, max_value=1000.0, value=float(parsed.get("Insulin") or 79.0))
+            bmi = st.number_input("BMI Index", min_value=0.0, max_value=70.0, value=float(parsed.get("BMI") or 25.0), step=0.1)
             
             st.markdown("<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;'>", unsafe_allow_html=True)
             
             st.markdown("<h4 style='color: #f8fafc; margin-bottom: 10px; font-size: 1.1rem;'>Cardiovascular & Vitals</h4>", unsafe_allow_html=True)
-            blood_pressure = st.number_input("Blood Pressure (mm Hg)", min_value=0.0, max_value=200.0, value=70.0)
+            blood_pressure = st.number_input("Blood Pressure (mm Hg)", min_value=0.0, max_value=200.0, value=float(parsed.get("BloodPressure") or 70.0))
             skin_thickness = st.number_input("Skin Thickness (mm)", min_value=0.0, max_value=100.0, value=20.0)
             
             st.markdown("<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;'>", unsafe_allow_html=True)
@@ -428,26 +474,30 @@ def render_sidebar():
             st.markdown("<h4 style='color: #f8fafc; margin-bottom: 10px; font-size: 1.1rem;'>Demographics</h4>", unsafe_allow_html=True)
             pregnancies = st.number_input("Pregnancies (count)", min_value=0, max_value=20, value=1, step=1)
             dpf = st.number_input("Diabetes Pedigree Fn.", min_value=0.0, max_value=3.0, value=0.5, step=0.01)
-            age = st.number_input("Age (years)", min_value=0, max_value=120, value=30, step=1)
+            age = st.number_input("Age (years)", min_value=0, max_value=120, value=int(parsed.get("Age") or 30), step=1)
             
         elif selected_disease == "Heart Disease Risk Assessment":
             st.markdown("<h4 style='color: #f8fafc; margin-bottom: 10px; font-size: 1.1rem;'>Demographics</h4>", unsafe_allow_html=True)
-            age = st.number_input("Age (years)", min_value=0, max_value=120, value=55, step=1)
+            age = st.number_input("Age (years)", min_value=0, max_value=120, value=int(parsed.get("Age") or 55), step=1)
             sex = st.selectbox("Sex", options=[("Male", 1), ("Female", 0)], format_func=lambda x: x[0])[1]
             
             st.markdown("<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;'>", unsafe_allow_html=True)
             
             st.markdown("<h4 style='color: #f8fafc; margin-bottom: 10px; font-size: 1.1rem;'>Cardiovascular</h4>", unsafe_allow_html=True)
             cp = st.selectbox("Chest Pain Type", options=[("Typical Angina", 0), ("Atypical Angina", 1), ("Non-anginal Pain", 2), ("Asymptomatic", 3)], format_func=lambda x: x[0])[1]
-            trestbps = st.number_input("Resting Blood Pressure (mm Hg)", min_value=0.0, max_value=250.0, value=130.0)
-            chol = st.number_input("Cholesterol (mg/dl)", min_value=0.0, max_value=600.0, value=250.0)
-            fbs = st.selectbox("Fasting Blood Sugar > 120 mg/dl", options=[("False", 0), ("True", 1)], format_func=lambda x: x[0])[1]
+            trestbps = st.number_input("Resting Blood Pressure (mm Hg)", min_value=0.0, max_value=250.0, value=float(parsed.get("BloodPressure") or 130.0))
+            chol = st.number_input("Cholesterol (mg/dl)", min_value=0.0, max_value=600.0, value=float(parsed.get("Cholesterol") or 250.0))
+            
+            fbs_val = 1 if (parsed.get("FastingBloodSugar") and float(parsed.get("FastingBloodSugar")) > 120.0) else 0
+            fbs_idx = fbs_val
+            fbs = st.selectbox("Fasting Blood Sugar > 120 mg/dl", index=fbs_idx, options=[("False", 0), ("True", 1)], format_func=lambda x: x[0])[1]
+            
             restecg = st.selectbox("Resting ECG Results", options=[("Normal", 0), ("ST-T Wave Abnormality", 1), ("Left Ventricular Hypertrophy", 2)], format_func=lambda x: x[0])[1]
             
             st.markdown("<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;'>", unsafe_allow_html=True)
             
             st.markdown("<h4 style='color: #f8fafc; margin-bottom: 10px; font-size: 1.1rem;'>Exercise & Angiography</h4>", unsafe_allow_html=True)
-            thalach = st.number_input("Maximum Heart Rate Achieved", min_value=0.0, max_value=250.0, value=150.0)
+            thalach = st.number_input("Maximum Heart Rate Achieved", min_value=0.0, max_value=250.0, value=float(parsed.get("HeartRate") or 150.0))
             exang = st.selectbox("Exercise Induced Angina", options=[("No", 0), ("Yes", 1)], format_func=lambda x: x[0])[1]
             oldpeak = st.number_input("ST Depression Induced by Exercise", min_value=0.0, max_value=10.0, value=1.0, step=0.1)
             slope = st.selectbox("Slope of Peak Exercise ST Segment", options=[("Upsloping", 0), ("Flat", 1), ("Downsloping", 2)], format_func=lambda x: x[0])[1]
@@ -456,33 +506,36 @@ def render_sidebar():
 
         elif selected_disease == "Full Health Screening":
             st.markdown("<h4 style='color: #f8fafc; margin-bottom: 10px; font-size: 1.1rem;'>Demographics</h4>", unsafe_allow_html=True)
-            age = st.number_input("Age (years)", min_value=0, max_value=120, value=45, step=1)
+            age = st.number_input("Age (years)", min_value=0, max_value=120, value=int(parsed.get("Age") or 45), step=1)
             sex = st.selectbox("Sex", options=[("Male", 1), ("Female", 0)], format_func=lambda x: x[0])[1]
             pregnancies = st.number_input("Pregnancies (if female)", min_value=0, max_value=20, value=0, step=1)
             
             st.markdown("<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;'>", unsafe_allow_html=True)
             
             st.markdown("<h4 style='color: #f8fafc; margin-bottom: 10px; font-size: 1.1rem;'>Metabolic Profile</h4>", unsafe_allow_html=True)
-            glucose = st.number_input("Glucose Level (mg/dL)", min_value=0.0, max_value=300.0, value=100.0)
-            insulin = st.number_input("Insulin Level (IU/mL)", min_value=0.0, max_value=1000.0, value=79.0)
-            bmi = st.number_input("BMI Index", min_value=0.0, max_value=70.0, value=25.0, step=0.1)
+            glucose = st.number_input("Glucose Level (mg/dL)", min_value=0.0, max_value=300.0, value=float(parsed.get("Glucose") or 100.0))
+            insulin = st.number_input("Insulin Level (IU/mL)", min_value=0.0, max_value=1000.0, value=float(parsed.get("Insulin") or 79.0))
+            bmi = st.number_input("BMI Index", min_value=0.0, max_value=70.0, value=float(parsed.get("BMI") or 25.0), step=0.1)
             dpf = st.number_input("Diabetes Pedigree Fn.", min_value=0.0, max_value=3.0, value=0.5, step=0.01)
             skin_thickness = st.number_input("Skin Thickness (mm)", min_value=0.0, max_value=100.0, value=20.0)
-            fbs = st.selectbox("Fasting Blood Sugar > 120 mg/dl", options=[("False", 0), ("True", 1)], format_func=lambda x: x[0])[1]
+            
+            fbs_val = 1 if (parsed.get("FastingBloodSugar") and float(parsed.get("FastingBloodSugar")) > 120.0) else 0
+            fbs_idx = fbs_val
+            fbs = st.selectbox("Fasting Blood Sugar > 120 mg/dl", index=fbs_idx, options=[("False", 0), ("True", 1)], format_func=lambda x: x[0])[1]
             
             st.markdown("<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;'>", unsafe_allow_html=True)
             
             st.markdown("<h4 style='color: #f8fafc; margin-bottom: 10px; font-size: 1.1rem;'>Cardiovascular & Vitals</h4>", unsafe_allow_html=True)
-            trestbps = st.number_input("Resting Blood Pressure (mm Hg)", min_value=0.0, max_value=250.0, value=130.0)
-            blood_pressure = st.number_input("Diastolic Blood Pressure (mm Hg)", min_value=0.0, max_value=200.0, value=70.0)
-            chol = st.number_input("Cholesterol (mg/dl)", min_value=0.0, max_value=600.0, value=250.0)
+            trestbps = st.number_input("Resting Blood Pressure (mm Hg)", min_value=0.0, max_value=250.0, value=float(parsed.get("BloodPressure") or 130.0))
+            blood_pressure = st.number_input("Diastolic Blood Pressure (mm Hg)", min_value=0.0, max_value=200.0, value=float(parsed.get("BloodPressure") or 70.0))
+            chol = st.number_input("Cholesterol (mg/dl)", min_value=0.0, max_value=600.0, value=float(parsed.get("Cholesterol") or 250.0))
             cp = st.selectbox("Chest Pain Type", options=[("Typical Angina", 0), ("Atypical Angina", 1), ("Non-anginal Pain", 2), ("Asymptomatic", 3)], format_func=lambda x: x[0])[1]
             restecg = st.selectbox("Resting ECG Results", options=[("Normal", 0), ("ST-T Wave Abnormality", 1), ("Left Ventricular Hypertrophy", 2)], format_func=lambda x: x[0])[1]
             
             st.markdown("<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;'>", unsafe_allow_html=True)
             
             st.markdown("<h4 style='color: #f8fafc; margin-bottom: 10px; font-size: 1.1rem;'>Exercise & Angiography</h4>", unsafe_allow_html=True)
-            thalach = st.number_input("Maximum Heart Rate Achieved", min_value=0.0, max_value=250.0, value=150.0)
+            thalach = st.number_input("Maximum Heart Rate Achieved", min_value=0.0, max_value=250.0, value=float(parsed.get("HeartRate") or 150.0))
             exang = st.selectbox("Exercise Induced Angina", options=[("No", 0), ("Yes", 1)], format_func=lambda x: x[0])[1]
             oldpeak = st.number_input("ST Depression Induced by Exercise", min_value=0.0, max_value=10.0, value=1.0, step=0.1)
             slope = st.selectbox("Slope of Peak Exercise ST Segment", options=[("Upsloping", 0), ("Flat", 1), ("Downsloping", 2)], format_func=lambda x: x[0])[1]
@@ -787,6 +840,91 @@ def render_model_performance(model_path: str, data_path: str, scaler_path: str, 
         logger.error(f"Model Perf Error: {e}")
         st.error(f"Failed to load model performance metrics: {e}")
 
+def render_history_dashboard():
+    st.markdown("<div class='section-header'>📈 Longitudinal Health Tracking</div>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#94a3b8; font-size: 1.1rem; margin-top: -10px; margin-bottom: 25px;'>Analyze your risk probability trends over time across multiple clinical assessments.</p>", unsafe_allow_html=True)
+    
+    user = st.session_state.get("user_data")
+    if not user:
+        st.error("Authentication error: No active user session.")
+        return
+        
+    user_id = user.get("id")
+    df_history = get_user_history(user_id)
+    
+    if df_history.empty:
+        st.markdown(
+            """
+            <div class="empty-state">
+                <h3 style="color: #f8fafc; margin-bottom: 10px; letter-spacing: 1px;">No Telemetry Data Available</h3>
+                <p style="color: #94a3b8; font-size: 1.15rem; max-width: 600px; margin: 0 auto;">
+                    You have not completed any health screenings yet. Initialize your first inference using the sidebar to begin tracking your longitudinal health metrics.
+                </p>
+            </div>
+            """, unsafe_allow_html=True
+        )
+        return
+        
+    # --- TREND CHARTS ---
+    st.markdown("<h4 style='color:#f8fafc; margin-bottom:15px;'>Diagnostic Trajectory</h4>", unsafe_allow_html=True)
+    
+    df_dia = get_history_by_type(user_id, "Diabetes Risk Assessment")
+    df_hrt = get_history_by_type(user_id, "Heart Disease Risk Assessment")
+    
+    col_chart1, col_chart2 = st.columns(2)
+    
+    with col_chart1:
+        if not df_dia.empty and len(df_dia) > 1:
+            fig_dia = px.line(
+                df_dia, x="created_at", y="probability", 
+                title="Metabolic Risk (Diabetes) Trend",
+                markers=True, template="plotly_dark",
+                color_discrete_sequence=["#00f2fe"]
+            )
+            fig_dia.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", yaxis_title="Probability (%)", xaxis_title="Date")
+            fig_dia.update_yaxes(range=[0, 100])
+            st.plotly_chart(fig_dia, use_container_width=True)
+        elif not df_dia.empty:
+            st.info("Additional Metabolic screenings required to visualize longitudinal trend.")
+        else:
+            st.info("No Metabolic screenings on record.")
+            
+    with col_chart2:
+        if not df_hrt.empty and len(df_hrt) > 1:
+            fig_hrt = px.line(
+                df_hrt, x="created_at", y="probability", 
+                title="Cardiovascular Risk (Heart) Trend",
+                markers=True, template="plotly_dark",
+                color_discrete_sequence=["#a855f7"]
+            )
+            fig_hrt.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", yaxis_title="Probability (%)", xaxis_title="Date")
+            fig_hrt.update_yaxes(range=[0, 100])
+            st.plotly_chart(fig_hrt, use_container_width=True)
+        elif not df_hrt.empty:
+            st.info("Additional Cardiovascular screenings required to visualize longitudinal trend.")
+        else:
+            st.info("No Cardiovascular screenings on record.")
+            
+    # --- DATA TABLE ---
+    st.markdown("<hr style='border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 30px 0;'>", unsafe_allow_html=True)
+    st.markdown("<h4 style='color:#f8fafc; margin-bottom:15px;'>Historical Registry</h4>", unsafe_allow_html=True)
+    
+    # Format the dataframe for display
+    display_df = df_history.copy()
+    display_df["created_at"] = pd.to_datetime(display_df["created_at"]).dt.strftime('%Y-%m-%d %H:%M')
+    display_df["probability"] = display_df["probability"].astype(float).round(1).astype(str) + "%"
+    
+    # Reorder and rename columns
+    display_cols = ["created_at", "assessment_type", "risk_level", "probability"]
+    display_df = display_df[display_cols].rename(columns={
+        "created_at": "Timestamp",
+        "assessment_type": "Assessment Module",
+        "risk_level": "Stratification",
+        "probability": "Risk Index"
+    })
+    
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
 def render_full_screening_dashboard(patient_data: dict):
     st.markdown(
         """
@@ -800,11 +938,12 @@ def render_full_screening_dashboard(patient_data: dict):
     dia_config = DISEASE_CONFIG["Diabetes Risk Assessment"]
     hrt_config = DISEASE_CONFIG["Heart Disease Risk Assessment"]
     
-    tab_pred, tab_data, tab_perf, tab_shap = st.tabs([
+    tab_pred, tab_data, tab_perf, tab_shap, tab_history = st.tabs([
         "🩺 Unified Prediction", 
         "📊 Aggregate Analytics", 
         "📈 Model Telemetry", 
-        "🧠 Dual Explainability"
+        "🧠 Dual Explainability",
+        "📈 My Health History"
     ])
     
     with tab_pred:
@@ -825,22 +964,95 @@ def render_full_screening_dashboard(patient_data: dict):
                     dia_result = dia_config["predict_func"](patient_data, model_path=dia_config["model_path"], scaler_path=dia_config["scaler_path"])
                     hrt_result = hrt_config["predict_func"](patient_data, model_path=hrt_config["model_path"], scaler_path=hrt_config["scaler_path"])
                 
+                dia_prob = float(dia_result['probability_percentage'])
+                hrt_prob = float(hrt_result['probability_percentage'])
+                
+                # --- Overall Health Intelligence Score ---
+                st.markdown("<div class='section-header' style='text-align:center;'>🌟 Overall Health Intelligence Score</div>", unsafe_allow_html=True)
+                overall_score = 100.0 - ((dia_prob * 0.5) + (hrt_prob * 0.5))
+                score_color = "#10b981" if overall_score > 75 else "#f59e0b" if overall_score > 50 else "#ef4444"
+                
+                st.markdown(f"""
+                <div style='background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 15px; padding: 30px; text-align: center; margin-bottom: 30px;'>
+                    <h1 style='font-size: 4rem; margin: 0; color: {score_color}; text-shadow: 0 0 20px {score_color}80;'>{overall_score:.1f}/100</h1>
+                    <p style='color: #94a3b8; font-size: 1.2rem; margin-top: 10px;'>Combined Systemic Wellness Index</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.markdown("<hr class='neon-divider'>", unsafe_allow_html=True)
+                st.markdown("<h3 style='color:#f8fafc; text-align:center; margin-bottom: 25px;'>Isolated Risk Stratification</h3>", unsafe_allow_html=True)
+
                 col_dia, col_hrt = st.columns(2)
                 
                 with col_dia:
-                    st.markdown("<div class='section-header'>💧 Metabolic Risk (Diabetes)</div>", unsafe_allow_html=True)
-                    m1, m2 = st.columns(2)
-                    m1.metric(label="Probability", value=f"{dia_result['probability_percentage']}%")
-                    m2.metric(label="Stratification", value=dia_result['risk_level'])
-                    st.plotly_chart(create_gauge_chart(dia_result['probability_percentage']), use_container_width=True)
-                    render_recommendations(dia_result['risk_level'])
+                    st.markdown("<div class='section-header' style='font-size: 1.2rem; text-align:center;'>💧 Metabolic Risk (Diabetes)</div>", unsafe_allow_html=True)
+                    st.markdown(f"""
+                    <div style='background: rgba(0, 242, 254, 0.05); border: 1px solid rgba(0, 242, 254, 0.2); border-radius: 10px; padding: 20px; text-align: center;'>
+                        <h2 style='color: #00f2fe; margin:0;'>{dia_prob}% Risk</h2>
+                        <p style='color: #f8fafc; font-size: 1.1rem;'>Tier: <strong>{dia_result['risk_level']}</strong></p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.plotly_chart(create_gauge_chart(dia_prob), use_container_width=True)
 
                 with col_hrt:
-                    st.markdown("<div class='section-header'>🫀 Cardiovascular Risk (Heart)</div>", unsafe_allow_html=True)
-                    m1, m2 = st.columns(2)
-                    m1.metric(label="Probability", value=f"{hrt_result['probability_percentage']}%")
-                    m2.metric(label="Stratification", value=hrt_result['risk_level'])
-                    st.plotly_chart(create_gauge_chart(hrt_result['probability_percentage']), use_container_width=True)
+                    st.markdown("<div class='section-header' style='font-size: 1.2rem; text-align:center;'>🫀 Cardiovascular Risk (Heart)</div>", unsafe_allow_html=True)
+                    st.markdown(f"""
+                    <div style='background: rgba(168, 85, 247, 0.05); border: 1px solid rgba(168, 85, 247, 0.2); border-radius: 10px; padding: 20px; text-align: center;'>
+                        <h2 style='color: #a855f7; margin:0;'>{hrt_prob}% Risk</h2>
+                        <p style='color: #f8fafc; font-size: 1.1rem;'>Tier: <strong>{hrt_result['risk_level']}</strong></p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.plotly_chart(create_gauge_chart(hrt_prob), use_container_width=True)
+                    
+                st.markdown("<hr class='neon-divider'>", unsafe_allow_html=True)
+                
+                # --- Cross-Disease Analytics ---
+                st.markdown("<div class='section-header'>🕸️ Cross-Disease Analytics</div>", unsafe_allow_html=True)
+                st.markdown("<p style='color:#94a3b8; margin-bottom: 20px;'>Normalized comparison of key biomarkers against physiological baselines.</p>", unsafe_allow_html=True)
+                
+                categories = ['Glucose', 'Cholesterol', 'BMI', 'Blood Pressure', 'Age']
+                
+                # Extract for visualization
+                p_gluc = float(patient_data.get('Glucose', 100))
+                p_chol = float(patient_data.get('Cholesterol', 200))
+                p_bmi = float(patient_data.get('BMI', 25))
+                p_bp = float(patient_data.get('trestbps', patient_data.get('BloodPressure', 120)))
+                p_age = float(patient_data.get('Age', 45))
+                
+                # Normalize values (0-100 scale roughly based on risk thresholds)
+                norm_gluc = min(100, (p_gluc / 140) * 100)
+                norm_chol = min(100, (p_chol / 240) * 100)
+                norm_bmi = min(100, (p_bmi / 30) * 100)
+                norm_bp = min(100, (p_bp / 140) * 100)
+                norm_age = min(100, (p_age / 80) * 100)
+                
+                patient_vals = [norm_gluc, norm_chol, norm_bmi, norm_bp, norm_age]
+                healthy_vals = [70, 70, 75, 85, 50] 
+                
+                fig_radar = go.Figure()
+                fig_radar.add_trace(go.Scatterpolar(
+                    r=patient_vals, theta=categories, fill='toself', name='Patient Biomarkers', line_color="#00f2fe"
+                ))
+                fig_radar.add_trace(go.Scatterpolar(
+                    r=healthy_vals, theta=categories, fill='toself', name='Healthy Baseline', line_color="#10b981"
+                ))
+                
+                fig_radar.update_layout(
+                    polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+                    showlegend=True, template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    margin=dict(t=20, b=20, l=20, r=20)
+                )
+                st.plotly_chart(fig_radar, use_container_width=True)
+                
+                # --- Recommendations ---
+                st.markdown("<hr class='neon-divider'>", unsafe_allow_html=True)
+                st.markdown("<div class='section-header'>📋 Unified Recommendations</div>", unsafe_allow_html=True)
+                col_rec1, col_rec2 = st.columns(2)
+                with col_rec1:
+                    st.markdown("<h4 style='color:#00f2fe; margin-bottom:10px;'>Metabolic Guidance</h4>", unsafe_allow_html=True)
+                    render_recommendations(dia_result['risk_level'])
+                with col_rec2:
+                    st.markdown("<h4 style='color:#a855f7; margin-bottom:10px;'>Cardiovascular Guidance</h4>", unsafe_allow_html=True)
                     render_recommendations(hrt_result['risk_level'])
                     
                 st.markdown("<hr class='neon-divider'>", unsafe_allow_html=True)
@@ -860,6 +1072,13 @@ def render_full_screening_dashboard(patient_data: dict):
                             mime="application/pdf",
                             use_container_width=True
                         )
+                        
+                        # --- HISTORY HOOK ---
+                        user_id = st.session_state.get("user_data", {}).get("id")
+                        if user_id:
+                            save_screening(user_id, "Diabetes Risk Assessment", dia_result['risk_level'], dia_result['probability_percentage'], report_path)
+                            save_screening(user_id, "Heart Disease Risk Assessment", hrt_result['risk_level'], hrt_result['probability_percentage'], report_path)
+                            
                 except Exception as e:
                     logger.error(f"Unified PDF Generation Error: {e}")
                     st.error(f"⚠️ Failed to generate Unified PDF report: {e}")
@@ -893,6 +1112,9 @@ def render_full_screening_dashboard(patient_data: dict):
                 render_explainability_section(patient_data, hrt_config["model_path"], hrt_config["scaler_path"], hrt_config["explain_func"])
         else:
             st.info("👈 Please initialize an AI Inference in the sidebar to generate custom Explainability Insights for this patient.")
+
+    with tab_history:
+        render_history_dashboard()
 
 def render_main_dashboard(patient_data: dict, selected_disease: str):
     if selected_disease == "Full Health Screening":
@@ -932,11 +1154,12 @@ def render_main_dashboard(patient_data: dict, selected_disease: str):
     target_col = config["target_col"]
     
     # Primary Dashboard Navigation
-    tab_pred, tab_data, tab_perf, tab_shap = st.tabs([
+    tab_pred, tab_data, tab_perf, tab_shap, tab_history = st.tabs([
         "🩺 AI Prediction", 
         "📊 Dataset Analytics", 
         "📈 Model Performance", 
-        "🧠 Explainable AI"
+        "🧠 Explainable AI",
+        "📈 My Health History"
     ])
     
     with tab_pred:
@@ -1001,6 +1224,12 @@ def render_main_dashboard(patient_data: dict, selected_disease: str):
                                 use_container_width=True
                             )
                             st.success("✅ Report generated securely.")
+                            
+                            # --- HISTORY HOOK ---
+                            user_id = st.session_state.get("user_data", {}).get("id")
+                            if user_id:
+                                save_screening(user_id, selected_disease, risk, prob, report_path)
+                                
                     except Exception as e:
                         logger.error(f"PDF Generation Error: {e}")
                         st.error(f"⚠️ Failed to generate PDF report: {e}")
@@ -1023,6 +1252,9 @@ def render_main_dashboard(patient_data: dict, selected_disease: str):
         else:
             st.info("👈 Please initialize an AI Inference in the sidebar to generate custom Explainability Insights for this patient.")
 
+    with tab_history:
+        render_history_dashboard()
+
 # --- APP EXECUTION ---
 def main():
     inject_custom_css()
@@ -1030,6 +1262,9 @@ def main():
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
         st.session_state["user_data"] = None
+        
+    if "parsed_data" not in st.session_state:
+        st.session_state["parsed_data"] = {}
         
     if not st.session_state["authenticated"]:
         render_auth_page()
